@@ -1789,6 +1789,10 @@
           <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v12m0 0 4-4m-4 4-4-4"/><path d="M5 19h14"/></svg>
           <span class="button-copy">Export Simulation</span>
         </button>
+        <button class="btn btn-secondary" id="downloadHtmlButton" type="button" disabled>
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v12m0 0 4-4m-4 4-4-4"/><path d="M5 19h14"/></svg>
+          <span class="button-copy">Download Interactive HTML</span>
+        </button>
       </div>
     </header>
 
@@ -2113,6 +2117,7 @@
     <div class="dialog-actions"><button class="btn btn-ghost" type="button" data-dialog-close="deleteCardDialog">Cancel</button><button class="btn btn-danger" id="confirmDeleteCardButton" type="button">Delete card</button></div>
   </dialog>
 
+  <script id="embeddedSimulation" type="application/json"></script>
   <script>
     (() => {
       "use strict";
@@ -2126,6 +2131,7 @@
       const SEARCH_LIMIT = 12;
       const OFFBOARD_LIST_LIMIT = 16;
       const MAX_EXPORT_LEVEL_COLUMNS = 24;
+      let applicationHtmlSource = "";
 
       const state = {
         people: new Map(),
@@ -2215,6 +2221,7 @@
         undoButton: document.getElementById("undoButton"),
         resetButton: document.getElementById("resetButton"),
         exportButton: document.getElementById("exportButton"),
+        downloadHtmlButton: document.getElementById("downloadHtmlButton"),
         loadingOverlay: document.getElementById("loadingOverlay"),
         loadingTitle: document.getElementById("loadingTitle"),
         loadingText: document.getElementById("loadingText"),
@@ -2608,7 +2615,7 @@
         const layer = Math.max(1, Number(record.rawLevel ?? record.depth ?? record.layer) || 1);
         return {
           id: String(record.id), name: String(record.name || "Unnamed employee"), role: String(record.role || "Role not provided"),
-          managerId: record.managerId ? String(record.managerId) : null, formerManagerId: null, children: new Set(), active: record.active !== false,
+          managerId: record.managerId ? String(record.managerId) : null, formerManagerId: record.formerManagerId ? String(record.formerManagerId) : null, children: new Set(), active: record.active !== false,
           depth: layer, layoutDepth: 1, subtreeSize: 0, indirectSubtreeHeadcount: 0, sourceRow: record.sourceRow || null,
           directIndirect: normalizeDirectIndirect(record.directIndirect), locationName: String(record.locationName || ""), regularTemporary: String(record.regularTemporary || ""),
           employeeStatus: String(record.employeeStatus || ""), positionStatus: normalizePositionStatus(record.positionStatus || record.employeeStatus), team: String(record.team || ""),
@@ -2863,6 +2870,7 @@
         el.globalSearch.disabled = false;
         el.directIndirectFilter.disabled = false;
         el.exportButton.disabled = false;
+        el.downloadHtmlButton.disabled = false;
         el.resetButton.disabled = false;
         el.emptyState.style.display = "none";
         el.graphView.classList.add("visible");
@@ -4140,7 +4148,7 @@
       function resetSimulation() {
         if (!state.baseline.size) return;
         const hasChanges = state.history.length > 0 || state.offboarded.size > 0 || [...state.people.values()].some((person) => person.isAdded);
-        if (hasChanges && !window.confirm("Restore the original uploaded structure? All simulation changes will be discarded.")) return;
+        if (hasChanges && !window.confirm("Restore the starting structure? All simulation changes will be discarded.")) return;
         state.people = new Map([...state.baseline.values()].map((snapshot) => {
           const person = createPerson(snapshot);
           return [person.id, person];
@@ -4150,7 +4158,7 @@
         rebuildHierarchy(); initializeReductionTargetState(); rebuildSearchIndex();
         state.selectedId = firstFilteredActiveId(); updateUiSummary();
         if (state.selectedId) selectPerson(state.selectedId, true);
-        toast("Original structure restored.", "success");
+        toast("Starting structure restored.", "success");
       }
 
       function openMoveDialog(personId) {
@@ -4199,6 +4207,100 @@
           guard += 1;
         }
         return names.reverse();
+      }
+
+      function serializeSimulation() {
+        return {
+          version: 1,
+          exportedAt: new Date().toISOString(),
+          people: [...state.people.values()].map(personSnapshot),
+          metadata: {
+            sourceName: state.sourceName,
+            sourceSheet: state.sourceSheet,
+            sourceLevelColumns: state.sourceLevelColumns,
+            warnings: [...state.warnings],
+          },
+          selectedId: state.selectedId,
+          directIndirectFilter: state.directIndirectFilter,
+        };
+      }
+
+      function escapeJsonForHtml(value) {
+        return JSON.stringify(value).replace(/[<>&]/g, (character) => ({
+          "<": "\\u003c",
+          ">": "\\u003e",
+          "&": "\\u0026",
+        })[character]);
+      }
+
+      function parseEmbeddedSimulation() {
+        const embedded = document.getElementById("embeddedSimulation");
+        if (!embedded?.textContent.trim()) return null;
+        try {
+          const simulation = JSON.parse(embedded.textContent);
+          if (!simulation || simulation.version !== 1 || !Array.isArray(simulation.people)
+            || !simulation.people.length
+            || simulation.people.some((person) => !person || person.id === null || person.id === undefined)) {
+            throw new Error("Unsupported or incomplete embedded simulation data.");
+          }
+          return simulation;
+        } catch (error) {
+          console.error("Unable to load the embedded organization simulation.", error);
+          toast("The embedded simulation could not be loaded. You can still upload an Excel file or use the demo.", "error", 7000);
+          return null;
+        }
+      }
+
+      function loadEmbeddedSimulation(simulation) {
+        if (!simulation) return false;
+        try {
+          loadDataset(simulation.people, simulation.metadata || {});
+
+          const savedFilter = String(simulation.directIndirectFilter || "all");
+          const filterExists = [...el.directIndirectFilter.options].some((option) => option.value === savedFilter);
+          el.directIndirectFilter.value = filterExists ? savedFilter : "all";
+          applyDirectIndirectFilter();
+
+          const savedSelection = simulation.selectedId ? state.people.get(String(simulation.selectedId)) : null;
+          if (savedSelection?.active && matchesWorkforceType(savedSelection)) selectPerson(savedSelection.id, true);
+
+          // The embedded document starts a fresh editing session. Its data is the
+          // baseline and history from the browser that created it is intentionally absent.
+          state.history = [];
+          captureBaseline();
+          updateUiSummary();
+          return true;
+        } catch (error) {
+          console.error("Unable to initialize the embedded organization simulation.", error);
+          toast("The embedded simulation is invalid. Upload an Excel file or use the demo instead.", "error", 7000);
+          return false;
+        }
+      }
+
+      function downloadInteractiveHtml() {
+        if (!state.people.size) return;
+        try {
+          const source = applicationHtmlSource || `<!DOCTYPE html>\n${document.documentElement.outerHTML}`;
+          const exportedDocument = new DOMParser().parseFromString(source, "text/html");
+          const embedded = exportedDocument.getElementById("embeddedSimulation");
+          if (!embedded) throw new Error("The embedded simulation container is missing.");
+          embedded.textContent = escapeJsonForHtml(serializeSimulation());
+
+          const html = `<!DOCTYPE html>\n${exportedDocument.documentElement.outerHTML}`;
+          const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement("a");
+          link.href = url;
+          link.download = `organization_simulation_${new Date().toISOString().slice(0, 10)}.html`;
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+          window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+          toast("Interactive HTML downloaded.", "success");
+        } catch (error) {
+          console.error(error);
+          toast(`Unable to generate the interactive HTML: ${error.message}`, "error", 6500);
+        }
       }
 
       function exportSimulation() {
@@ -4558,6 +4660,7 @@
       el.demoButton.addEventListener("click", loadDemo);
       el.demoButtonEmpty.addEventListener("click", loadDemo);
       el.exportButton.addEventListener("click", exportSimulation);
+      el.downloadHtmlButton.addEventListener("click", downloadInteractiveHtml);
       el.undoButton.addEventListener("click", undoLastAction);
       el.resetButton.addEventListener("click", resetSimulation);
 
@@ -5066,6 +5169,7 @@
         },
         undo: undoLastAction,
         reset: resetSimulation,
+        serializeSimulation,
         getPerson(personId) {
           const person = state.people.get(String(personId));
           if (!person) return null;
@@ -5118,7 +5222,11 @@
         },
       });
 
-      updateUiSummary();
+      // Capture the parsed application before any dataset is rendered. Downloads
+      // are generated from this clean source rather than the live, transient DOM.
+      applicationHtmlSource = `<!DOCTYPE html>\n${document.documentElement.outerHTML}`;
+      const embeddedSimulation = parseEmbeddedSimulation();
+      if (!loadEmbeddedSimulation(embeddedSimulation)) updateUiSummary();
     })();
   </script>
 </body>

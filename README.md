@@ -6,6 +6,12 @@ Single-page application for exploring and simulating an organization structure d
 
 The public entry point is `index.html`. The repository can be deployed as a static site (for example on GitHub Pages or Vercel). The application uses SheetJS from CDN for Excel import/export.
 
+## Interactive HTML export
+
+After uploading an Excel file and modifying the organization, click **Download Interactive HTML** to save a fully interactive copy of the current simulation. The generated HTML can be shared or opened directly in a browser, where users can continue navigating, editing, undoing, resetting, and exporting without having the original Excel file.
+
+The organization state is safely embedded inside the downloaded HTML itself. It remains entirely local and client-side; no database, backend, authentication service, or network-based persistence is used.
+
 ## Excel input used by this version
 
 This version is optimized for the workbook structure used in `EmployeeData_with_Teams_and_Levels.xlsx` and automatically prioritizes the worksheet **`Excel Output`**.
