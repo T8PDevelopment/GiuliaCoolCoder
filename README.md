@@ -12,7 +12,19 @@ After uploading an Excel file and modifying the organization, click **Download I
 
 The organization state is safely embedded inside the downloaded HTML itself. It remains entirely local and client-side; no database, backend, authentication service, or network-based persistence is used.
 
-## Excel input used by this version
+## Excel import modes
+
+### Source Excel
+
+Use **Upload Excel** to start from the original HR/source workbook. This flow continues to prioritize the **`Excel Output`** worksheet and supports the source columns described below.
+
+### Simulation Excel
+
+Use **Load Simulation Excel** to reopen an `.xlsx`, `.xls`, or `.xlsm` workbook previously created with **Export Simulation**. This dedicated flow requires the **`Organization`** worksheet, rebuilds reporting relationships from `Manager` (with the exported `Level 1`, `Level 2`, … path as a fallback), and restores saved layers, peer ordering, placeholders, position state, Exit List data, and simulator badges.
+
+The loaded simulation becomes the new **Reset** baseline and starts with an empty Undo history. It can be edited and exported again as either a Simulation Excel workbook or a standalone **Interactive HTML** containing the latest state; the original Excel file is not needed to reopen the HTML.
+
+## Source Excel format used by this version
 
 This version is optimized for the workbook structure used in `EmployeeData_with_Teams_and_Levels.xlsx` and automatically prioritizes the worksheet **`Excel Output`**.
 
